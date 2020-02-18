@@ -31,10 +31,6 @@
 /************************ Example Starts Here *******************************/
 
 #include <Wire.h>
-#include "SparkFun_Qwiic_OpenLog_Arduino_Library.h"
-OpenLog myLog; //Create instance
-
-const byte OpenLogAddress = 42; //Default Qwiic OpenLog I2C address
 
 #include <SparkFunBME280.h>
 #include <SparkFunCCS811.h>
@@ -61,34 +57,31 @@ float alt;
 float eco2;
 float tvoc;
 
-const int STATUS_LED = 13;
 //This is in milliseconds
 const int SAMPLE_RATE = 15000;
 
 void setup()
 {
-  pinMode(STATUS_LED, OUTPUT);
-
   Serial.begin(115200);
 
+  Serial.print("Connecting to Adafruit IO...");
+
+  // connect to io.adafruit.com
+  io.connect();
+
+  // wait for a connection
+  while (io.status() < AIO_CONNECTED) {
+    Serial.print(".");
+    delay(500);
+  }
   Serial.println();
+
+  Serial.println();
+  Serial.println(io.statusText());
+
   Serial.println("Apply BME280 data to CCS811 for compensation.");
 
   Wire.begin();//initialize I2C bus
-  myLog.begin(); //Open connection to OpenLog (no pun intended)
-
-  //This begins the CCS811 sensor and prints error status of .begin()
-  CCS811Core::status returnCode = myCCS811.begin();
-  if (returnCode != CCS811Core::SENSOR_SUCCESS)
-  {
-    Serial.println("Problem with CCS811");
-    printDriverError(returnCode);
-  }
-  else
-  {
-    Serial.println("CCS811 online");
-  }
-
 
   //Initialize BME280
   //For I2C, enable the following and disable the SPI section
@@ -103,6 +96,7 @@ void setup()
 
   //Calling .begin() causes the settings to be loaded
   delay(10);  //Make sure sensor had enough time to turn on. BME280 requires 2ms to start up.
+  
   byte id = myBME280.begin(); //Returns ID of 0x60 if successful
   if (id != 0x60)
   {
@@ -113,23 +107,10 @@ void setup()
     Serial.println("BME280 online");
   }
 
-  Serial.print("Connecting to Adafruit IO");
-
-  // connect to io.adafruit.com
-  io.connect();
-
-  // wait for a connection
-  while (io.status() < AIO_CONNECTED) {
-    Serial.print(".");
-    delay(500);
-  }
-
-  // we are connected
-  Serial.println();
-  Serial.println(io.statusText());
-
 }
+
 //---------------------------------------------------------------
+
 void loop()
 {
   // io.run(); is required for all sketches.
@@ -146,9 +127,12 @@ void loop()
     //printData fetches the values of tVOC and eCO2
     printData();
     uploadData();
-    recordData();
+    //recordData();
 
     float BMEtempC = myBME280.readTempC();
+
+    // Apply offset to account for the heat produced buy the sensors
+    BMEtempC = BMEtempC - 2.4;
     float BMEhumid = myBME280.readFloatHumidity();
 
     Serial.print("Applying new values (deg C, %): ");
@@ -165,34 +149,10 @@ void loop()
     Serial.println(myCCS811.getErrorRegister()); //Prints whatever CSS811 error flags are detected
   }
 
-  digitalWrite(STATUS_LED, HIGH);
-  delay(250);
-  digitalWrite(STATUS_LED, LOW);
-
   delay(SAMPLE_RATE); //Wait for next reading
 }
 
 //---------------------------------------------------------------
-void recordData()
-{
-  myLog.append("EnvironData.csv");
-
-  String toWrite;
-  toWrite.concat(String(temp));
-  toWrite.concat("\t");
-  toWrite.concat(String(humidity));
-  toWrite.concat("\t");
-  toWrite.concat(String(pressure));
-  toWrite.concat("\t");
-  toWrite.concat(String(alt));
-  toWrite.concat("\t");
-  toWrite.concat(String(eco2));
-  toWrite.concat("\t");
-  toWrite.concat(String(tvoc));
-
-  myLog.println(toWrite);
-}
-
 void uploadData()
 {
   temperatureIO->save(temp);
@@ -248,33 +208,4 @@ void printData()
   Serial.print("]%");
 
   Serial.println();
-}
-
-//printDriverError decodes the CCS811Core::status type and prints the
-//type of error to the serial terminal.
-//
-//Save the return value of any function of type CCS811Core::status, then pass
-//to this function to see what the output was.
-void printDriverError( CCS811Core::status errorCode )
-{
-  switch ( errorCode )
-  {
-    case CCS811Core::SENSOR_SUCCESS:
-      Serial.print("SUCCESS");
-      break;
-    case CCS811Core::SENSOR_ID_ERROR:
-      Serial.print("ID_ERROR");
-      break;
-    case CCS811Core::SENSOR_I2C_ERROR:
-      Serial.print("I2C_ERROR");
-      break;
-    case CCS811Core::SENSOR_INTERNAL_ERROR:
-      Serial.print("INTERNAL_ERROR");
-      break;
-    case CCS811Core::SENSOR_GENERIC_ERROR:
-      Serial.print("GENERIC_ERROR");
-      break;
-    default:
-      Serial.print("Unspecified error.");
-  }
 }
